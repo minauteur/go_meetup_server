@@ -6,6 +6,8 @@ github.com/minauteur/go_meetup_api v0.0.1 h1:/luEPzyka6fXfEeYxgIrulh/lxdwV3fyvjy
 github.com/minauteur/go_meetup_api v0.0.1/go.mod h1:TCGGzByLREC1ywop/GgYiCNK/q1x+XVPuRmOoyqzjK4=
 github.com/minauteur/go_meetup_api v0.0.2-breaking h1:rrbNe1o5i16MtxxjUN4bJAZSvJlUkXhf4hvjJcLr5ck=
 github.com/minauteur/go_meetup_api v0.0.2-breaking/go.mod h1:wfQqcmfU+Np0pbXIcca6RvaM2wz9+isRm50/DYs08Qo=
+github.com/minauteur/go_meetup_api v0.0.3 h1:QgXCJ12wWBIxFgg511VYqQNgxBZZMJbFH1FLa8rSAKk=
+github.com/minauteur/go_meetup_api v0.0.3/go.mod h1:GmqcvzyUuT1MMN1nHccWEbJGqEbkJDZQOvPZdwpTUQM=
 golang.org/x/net v0.8.0 h1:Zrh2ngAOFYneWTAIAPethzeaQLuHwhuBkuV6ZiRnUaQ=
 golang.org/x/net v0.8.0/go.mod h1:QVkue5JL9kW//ek3r6jTKnTFis1tRmNAW2P1shuFdJc=
 golang.org/x/text v0.8.0 h1:57P1ETyNKtuIjB4SRd15iJxuhj8Gc416Y78H3qgMh68=
