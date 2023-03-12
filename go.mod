@@ -2,7 +2,7 @@ module github.com/minauteur/go_meetup_server
 
 go 1.18
 
-require github.com/minauteur/go_meetup_api v0.0.1
+require github.com/minauteur/go_meetup_api v0.0.2-breaking
 
 require (
 	github.com/bufbuild/connect-go v1.5.2 // indirect
