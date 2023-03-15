@@ -8,15 +8,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/bufbuild/connect-go"
-	greetingpb "github.com/minauteur/go_meetup_api/go/api/greeting/v1"
 	greetingpbconnect "github.com/minauteur/go_meetup_api/go/api/greeting/v1/greetingpbconnect"
-	waitpb "github.com/minauteur/go_meetup_api/go/api/wait/v1"
+	recpbconnect "github.com/minauteur/go_meetup_api/go/api/record/v1/recpbconnect"
 	waitpbconnect "github.com/minauteur/go_meetup_api/go/api/wait/v1/waitpbconnect"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -39,13 +37,16 @@ func main() {
 		syscall.SIGINT,
 	)
 
+	interceptor := connect.WithInterceptors(authInterceptor())
 	// create a new http request multiplexer
 	mux := http.NewServeMux()
 
-	// create a handler in the standard fashion for our greeting server
+	// create a standard connect handler for our greeting server
 	gPath, gHandler := greetingpbconnect.NewGreetingAPIHandler(GreetingAPIServer{})
 	mux.Handle(gPath, gHandler)
 
+	rPath, rHandler := recpbconnect.NewRecordAPIHandler(RecordAPIServer{}, interceptor)
+	mux.Handle(rPath, rHandler)
 	// for our wait server, which could take some time responding to requests,
 	// we can wrap the standard handler in an http.HandlerFunc that includes a waitgroup
 	// for waiting on inflight requests to be handled before shutting down.
@@ -63,12 +64,13 @@ func main() {
 		Addr:    addr,
 		Handler: h2c.NewHandler(mux, &http2.Server{}),
 		BaseContext: func(l net.Listener) context.Context {
-			return ctx
+			return context.WithValue(ctx, "isBaseContext", true)
 		},
 	}
 
 	// spawn a goroutine for our server
 	go func() {
+		log.Printf("listening")
 		err := srv.ListenAndServe()
 		if err != nil && err != http.ErrServerClosed {
 			log.Fatalf("fatal server error: %s", err.Error())
@@ -109,10 +111,13 @@ L:
 			log.Printf("Handled all inflight requests; exiting...")
 			break L
 		case <-time.After(timeout):
+
+			log.Printf("Timeout expired; closing active connections...")
 			// this will close the Done() channel of our handler without exiting the program,
 			// triggering error errors with connect.CodeAborted in responses to any inflight requests
 			syscall.Kill(syscall.Getpid(), syscall.SIGUSR1)
-			log.Printf("Timeout expired; closing active connections...")
+			// after the signal has been sent the handler, we can stop propagating
+			stopNotify()
 		}
 	}
 
@@ -122,83 +127,5 @@ L:
 		log.Fatalf("shutdown error: %s", err.Error())
 	} else {
 		log.Printf("gracefully shut down")
-	}
-	stopNotify()
-}
-
-type WaitAPIServer struct {
-	waitpbconnect.UnimplementedWaitAPIHandler
-	waitpbconnect.WaitAPIHandler
-}
-
-type GreetingAPIServer struct {
-	greetingpbconnect.UnimplementedGreetingAPIHandler
-	greetingpbconnect.GreetingAPIHandler
-}
-
-func (g GreetingAPIServer) Greet(ctx context.Context, req *connect.Request[greetingpb.GreetingMessage]) (*connect.Response[greetingpb.GreetingResponse], error) {
-	msg := req.Msg
-	res := connect.Response[greetingpb.GreetingResponse]{}
-	if msg.GetName() == "" && msg.GetEntityType() == greetingpb.GreetingMessage_ENTITY_TYPE_UNKNOWN {
-		resMsg := greetingpb.GreetingResponse{
-			Message: "Greetings, mysterious being...",
-		}
-		res.Msg = &resMsg
-		return &res, nil
-	}
-	greetingResponse := "Greetings, "
-	if strings.TrimSpace(msg.GetName()) != "" {
-		greetingResponse += msg.GetName() + ", "
-	}
-	switch msg.GetEntityType() {
-	case greetingpb.GreetingMessage_ENTITY_TYPE_HUMAN:
-		greetingResponse += "earthling"
-	case greetingpb.GreetingMessage_ENTITY_TYPE_EXTRA_TERRESTRIAL:
-		greetingResponse += "spaceling"
-	default:
-		greetingResponse += "being of unknown origin"
-	}
-
-	res.Msg = &greetingpb.GreetingResponse{
-		Message: greetingResponse,
-	}
-	return &res, nil
-
-}
-
-func (w WaitAPIServer) Wait(ctx context.Context, req *connect.Request[waitpb.WaitRequest]) (*connect.Response[waitpb.WaitResponse], error) {
-	msg := req.Msg
-
-	wt := msg.GetWaitTime()
-
-	log.Printf("WaitAPIServer: waiting %d seconds...", wt)
-	res := connect.Response[waitpb.WaitResponse]{
-		Msg: &waitpb.WaitResponse{
-			Message: fmt.Sprintf("waited %d seconds", wt),
-		},
-	}
-	doneWaiting := make(chan bool)
-	go func() {
-		time.Sleep(time.Second * time.Duration(wt))
-		close(doneWaiting)
-	}()
-	seconds := 0
-	countDone := make(chan bool)
-	go func() {
-		for {
-			select {
-			case <-time.After(time.Second):
-				seconds += 1
-			case <-countDone:
-				return
-			}
-		}
-	}()
-	select {
-	case <-ctx.Done():
-		close(countDone)
-		return nil, connect.NewError(connect.CodeAborted, fmt.Errorf("wait aborted after %ds", seconds))
-	case <-doneWaiting:
-		return &res, nil
 	}
 }
