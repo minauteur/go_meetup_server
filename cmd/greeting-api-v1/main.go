@@ -22,12 +22,16 @@ import (
 	"golang.org/x/net/http2/h2c"
 )
 
+// set a timeout
+const timeout = time.Second * 20
 const addr = "0.0.0.0:8080"
 
 func main() {
 
 	// create a wait group for awaiting inflight requests to complete on shutdown
 	wg := sync.WaitGroup{}
+
+	ctx, notifyStop := signal.NotifyContext(context.Background(), syscall.SIGINT)
 
 	// create a channel for listening to signals
 	signals := make(chan os.Signal, 1)
@@ -58,18 +62,21 @@ func main() {
 	})
 	mux.Handle(wPath, wh)
 
-	// create an http server with our request multiplexer and its registered handlers
-	srv := http.Server{
-		Addr:    addr,
-		Handler: h2c.NewHandler(mux, &http2.Server{}),
-	}
-
 	// create a listener for our server
 	ln, err := net.Listen("tcp", ":8080")
 	if err != nil {
 		log.Fatalf("listener error: %s", err.Error())
 	}
 	log.Println("Listening on", addr)
+
+	// create an http server with our request multiplexer and its registered handlers
+	srv := http.Server{
+		Addr:    addr,
+		Handler: h2c.NewHandler(mux, &http2.Server{}),
+		BaseContext: func(l net.Listener) context.Context {
+			return ctx
+		},
+	}
 
 	// spawn a goroutine for our server
 	go func() {
@@ -100,11 +107,8 @@ func main() {
 		done <- struct{}{}
 	}()
 
-	// set a timeout
-	timeout := time.Second * 20
-
-	// if wg.Wait() returns before the timeout expires, we've handled all inlfight requests successfully
-	// otherwise we abort if the timeout has expired.
+	// if wg.Wait() returns before the timeout expires, we've handled all inlfight requests successfully.
+	// Otherwise, we abort if the timeout has expired.
 	// In a real situation we might want to do some additional cleanup or handling
 	select {
 	case <-done:
@@ -113,13 +117,18 @@ func main() {
 		log.Printf("Timeout expired; closing active connections...")
 	}
 
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(timeout))
+	// attempt to shut down the server,
+	shutdownCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("shutdown error: %s", err.Error())
+		os.Exit(1)
 	} else {
 		log.Printf("gracefully stopped")
 	}
+	notifyStop()
+
+	os.Exit(0)
 
 }
 
@@ -174,10 +183,22 @@ func (w WaitAPIServer) Wait(ctx context.Context, req *connect.Request[waitpb.Wai
 			Message: fmt.Sprintf("waited %d seconds", wt),
 		},
 	}
-	time.Sleep(time.Second * time.Duration(wt))
-	return &res, nil
-}
-
-func shutDownWithDeadline(srv http.Server, timeout time.Duration) {
+	waitCh := make(chan bool)
+	go func() {
+		time.Sleep(time.Second * time.Duration(wt))
+		waitCh <- true
+	}()
+	seconds := 0
+	for {
+		select {
+		case <-time.After(time.Second):
+			seconds += 1
+		case <-waitCh:
+			return &res, nil
+		case <-ctx.Done():
+			log.Printf("context Error: %s", ctx.Err().Error())
+			return nil, connect.NewError(connect.CodeAborted, fmt.Errorf("requested wait: %ds interrupted at %ds", wt, seconds))
+		}
+	}
 
 }
