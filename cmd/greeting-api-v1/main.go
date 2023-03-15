@@ -25,7 +25,7 @@ import (
 const addr = "0.0.0.0:8080"
 
 func main() {
-
+	ctx, stopNotify := signal.NotifyContext(context.Background(), syscall.SIGUSR1)
 	// create a wait group for awaiting inflight requests to complete on shutdown
 	wg := sync.WaitGroup{}
 
@@ -62,18 +62,14 @@ func main() {
 	srv := http.Server{
 		Addr:    addr,
 		Handler: h2c.NewHandler(mux, &http2.Server{}),
+		BaseContext: func(l net.Listener) context.Context {
+			return ctx
+		},
 	}
-
-	// create a listener for our server
-	ln, err := net.Listen("tcp", ":8080")
-	if err != nil {
-		log.Fatalf("listener error: %s", err.Error())
-	}
-	log.Println("Listening on", addr)
 
 	// spawn a goroutine for our server
 	go func() {
-		err := srv.Serve(ln)
+		err := srv.ListenAndServe()
 		if err != nil && err != http.ErrServerClosed {
 			log.Fatalf("fatal server error: %s", err.Error())
 		}
@@ -101,16 +97,23 @@ func main() {
 	}()
 
 	// set a timeout
-	timeout := time.Second * 20
+	timeout := time.Second * 5
 
-	// if wg.Wait() returns before the timeout expires, we've handled all inlfight requests successfully
-	// otherwise we abort if the timeout has expired.
+	// if wg.Wait() returns before the timeout expires, we've handled all inflight requests successfully
+	// otherwise we close any connections that remain open prematurely if necessary by closing the context we pass to the handler
 	// In a real situation we might want to do some additional cleanup or handling
-	select {
-	case <-done:
-		log.Printf("Handled all inflight requests; exiting...")
-	case <-time.After(timeout):
-		log.Printf("Timeout expired; closing active connections...")
+L:
+	for {
+		select {
+		case <-done:
+			log.Printf("Handled all inflight requests; exiting...")
+			break L
+		case <-time.After(timeout):
+			// this will close the Done() channel of our handler without exiting the program,
+			// triggering error errors with connect.CodeAborted in responses to any inflight requests
+			syscall.Kill(syscall.Getpid(), syscall.SIGUSR1)
+			log.Printf("Timeout expired; closing active connections...")
+		}
 	}
 
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(timeout))
@@ -118,9 +121,9 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatalf("shutdown error: %s", err.Error())
 	} else {
-		log.Printf("gracefully stopped")
+		log.Printf("gracefully shut down")
 	}
-
+	stopNotify()
 }
 
 type WaitAPIServer struct {
@@ -174,10 +177,28 @@ func (w WaitAPIServer) Wait(ctx context.Context, req *connect.Request[waitpb.Wai
 			Message: fmt.Sprintf("waited %d seconds", wt),
 		},
 	}
-	time.Sleep(time.Second * time.Duration(wt))
-	return &res, nil
-}
-
-func shutDownWithDeadline(srv http.Server, timeout time.Duration) {
-
+	doneWaiting := make(chan bool)
+	go func() {
+		time.Sleep(time.Second * time.Duration(wt))
+		close(doneWaiting)
+	}()
+	seconds := 0
+	countDone := make(chan bool)
+	go func() {
+		for {
+			select {
+			case <-time.After(time.Second):
+				seconds += 1
+			case <-countDone:
+				return
+			}
+		}
+	}()
+	select {
+	case <-ctx.Done():
+		close(countDone)
+		return nil, connect.NewError(connect.CodeAborted, fmt.Errorf("wait aborted after %ds", seconds))
+	case <-doneWaiting:
+		return &res, nil
+	}
 }
