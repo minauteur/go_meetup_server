@@ -1,4 +1,4 @@
-package main
+package handler
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 
 const tokenHeader = "Authorization"
 
-func authInterceptor() connect.UnaryInterceptorFunc {
+func AuthInterceptor() connect.UnaryInterceptorFunc {
 	interceptor := func(next connect.UnaryFunc) connect.UnaryFunc {
 		return connect.UnaryFunc(func(
 			ctx context.Context,
