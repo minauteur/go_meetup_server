@@ -24,14 +24,29 @@
     ```
     curl -X POST --data '{}' --header 'Content-Type: application/json' http://0.0.0.0:8080/api.greeting.v1.GreetingAPI/Greet
     ```
-
   * *grpcurl*
     ```
     grpcurl -plaintext -import-path ./proto -proto ./proto/api/greeting/v1/service.proto -d '{"name":"Me", "entity_type": "ENTITY_TYPE_HUMAN"}' 0.0.0.0:8080 api.greeting.v1.GreetingAPI/Greet
     ```
  * To Demonstrate Graceful Shutdown:
  
-    **NOTE:** The timeout is set to 10 seconds in `main.go`, to test graceful shutdown, quickly interrupt the server (e.g. with its terminal active, press `Ctrl+c`) _after_ sending one of the following requests:
+    **NOTE:** The timeout is set to 10 seconds in `main.go`--in order to test graceful shutdown, you must quickly interrupt the server (e.g. press `Ctrl+c` in the shell where the server is running) _after_ sending one of the following requests:
     
-    * *example interrupt with wait time _within_ the timeout period:*
-   
+   * *example interrupt with wait time _within_ the timeout period:*
+     ``` 
+     grpcurl -plaintext -import-path ./proto -proto ./proto/api/wait/v1/service.proto -d '{"wait_time": 5}' 0.0.0.0:8080 api.wait.v1.WaitAPI/Wait
+     ```
+   * *example interrupt with wait time **longer** than the timeout (e.g. timeout expires):*
+     ```
+     grpcurl -plaintext -import-path ./proto -proto ./proto/api/wait/v1/service.proto -d '{"wait_time": 20}' 0.0.0.0:8080 api.wait.v1.WaitAPI/Wait
+     ```
+     
+  * To Demonstrate Interceptor and Fieldmask Behavior:
+    * *with "admin" authorization (all fields returned):*
+      ```
+      grpcurl -plaintext -import-path ./proto -proto ./proto/api/record/v1/service.proto -H 'Authorization: valid' 0.0.0.0:8080 api.record.v1.RecordAPI/Get
+      ```
+    * *with "non-admin" authorization (public fields only returned):*
+      ```
+      grpcurl -plaintext -import-path ./proto -proto ./proto/api/record/v1/service.proto -H 'Authorization: INvalid' 0.0.0.0:8080 api.record.v1.RecordAPI/Get
+      ```
