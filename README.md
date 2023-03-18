@@ -1,3 +1,8 @@
+> ## :warning: **NOTE**  :warning:
+> - examples were made to demonstrate flexibility/usage of individual components
+> - usage is atypical/incongruent with best practice to the point of exhibiting an anti-pattern in several cases: *interceptor/fieldmask, and **graceful shutdown examples particularly
+> - **None of this code is suitable for production**
+
 ## Starting the app
 
 * clone the `go_meetup_api` repo as a sibling of this repo:
@@ -50,3 +55,10 @@
       ```
       grpcurl -plaintext -import-path ./proto -proto ./proto/api/record/v1/service.proto -H 'Authorization: INvalid' 0.0.0.0:8080 api.record.v1.RecordAPI/Get
       ```
+
+
+
+
+*interceptors and authentication are entirely separate concepts from fieldmasking, and fieldmasks aren't generally dependencies of auth--while auth is a frequent use-case for an interceptor, fieldmasks are typically present on requests themselves and applied to the response in the handler
+
+**there is a race condition; it's possible for a connection to be closed before we can send a sensible error message from the handler--to ensure tcp connections remain open long enough for a sensible response to be sent from the handler, we'd need to synchronize (e.g. use a `sync.WaitGroup`) in the `tcp.Accept()` loop of the server, which required too much implementation for the scope of this talk.
